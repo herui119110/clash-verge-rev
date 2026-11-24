@@ -11,6 +11,7 @@ import {
   Fab,
   IconButton,
   MenuItem,
+  TextField,
   Tooltip,
   Zoom,
 } from '@mui/material'
@@ -32,6 +33,7 @@ import {
 } from '@/components/connection/connection-detail'
 import { ConnectionRowItem } from '@/components/connection/connection-row-item'
 import {
+  getConnectionRule,
   getConnectionStartTime,
   useConnectionRowViews,
 } from '@/components/connection/connection-row-view'
@@ -75,6 +77,19 @@ type OrderKey = (typeof ORDER_OPTIONS)[number]['id']
 type NetworkFilter = 'all' | 'tcp' | 'udp'
 
 let savedNetworkFilter: NetworkFilter = 'all'
+let savedGroupFilter = ''
+let savedRuleFilter = ''
+
+const getPastedHostname = (text: string) => {
+  const value = text.trim()
+  if (!/^https?:\/\//i.test(value)) return
+  try {
+    const { hostname } = new URL(value)
+    return hostname.startsWith('[') ? hostname.slice(1, -1) : hostname
+  } catch {
+    return undefined
+  }
+}
 
 const orderFunctionMap = ORDER_OPTIONS.reduce<Record<OrderKey, OrderFunc>>(
   (acc, option) => {
@@ -93,7 +108,9 @@ const ConnectionsPage = () => {
   const [curOrderOpt, setCurOrderOpt] = useState<OrderKey>('default')
   const [networkFilter, setNetworkFilter] =
     useState<NetworkFilter>(savedNetworkFilter)
-  const hasFilter = networkFilter !== 'all'
+  const [groupFilter, setGroupFilter] = useState(savedGroupFilter)
+  const [ruleFilter, setRuleFilter] = useState(savedRuleFilter)
+  const hasFilter = networkFilter !== 'all' || !!groupFilter || !!ruleFilter
   const [connectionsType, setConnectionsType] = useState<'active' | 'closed'>(
     'active',
   )
@@ -117,6 +134,18 @@ const ConnectionsPage = () => {
       ? (connections?.activeConnections ?? EMPTY_CONNECTIONS)
       : (connections?.closedConnections ?? EMPTY_CONNECTIONS)
 
+  const { groups, rules } = useMemo(() => {
+    const groups = new Set<string>()
+    const rules = new Set<string>()
+    for (const conn of selectedConnections) {
+      // Mihomo reports the outbound first, followed by its enclosing groups.
+      for (let i = 1; i < conn.chains.length; i++) groups.add(conn.chains[i])
+      const rule = getConnectionRule(conn)
+      if (rule) rules.add(rule)
+    }
+    return { groups, rules }
+  }, [selectedConnections])
+
   const filterConn = useMemo(() => {
     const orderFunc = orderFunctionMap[curOrderOpt]
 
@@ -126,6 +155,8 @@ const ConnectionsPage = () => {
     const matchConns = selectedConnections.filter((conn) => {
       const { host, destinationIP, process, network } = conn.metadata
       if (networkFilter !== 'all' && network !== networkFilter) return false
+      if (groupFilter && conn.chains.indexOf(groupFilter, 1) < 0) return false
+      if (ruleFilter && getConnectionRule(conn) !== ruleFilter) return false
       return (
         !hasSearch ||
         match(host || '') ||
@@ -141,6 +172,8 @@ const ConnectionsPage = () => {
     hasSearch,
     hasFilter,
     networkFilter,
+    groupFilter,
+    ruleFilter,
     match,
     curOrderOpt,
   ])
@@ -243,6 +276,7 @@ const ConnectionsPage = () => {
           display: 'flex',
           alignItems: 'center',
           gap: 1,
+          flexWrap: 'wrap',
           userSelect: 'text',
           position: 'sticky',
           top: 0,
@@ -299,7 +333,8 @@ const ConnectionsPage = () => {
         </BaseStyledSelect>
         <Box
           sx={{
-            flex: 1,
+            flex: '1 1 180px',
+            minWidth: 0,
             display: 'flex',
             alignItems: 'center',
             '& > *': {
@@ -310,6 +345,7 @@ const ConnectionsPage = () => {
           <BaseSearchBox
             defaultValue={searchState.text}
             {...searchState}
+            normalizePastedText={getPastedHostname}
             onSearch={onSearch}
           />
         </Box>
@@ -325,6 +361,52 @@ const ConnectionsPage = () => {
             </IconButton>
           </Tooltip>
         )}
+      </Box>
+      <Box
+        sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mx: '10px', my: 1 }}
+      >
+        {[
+          {
+            id: 'proxy-group',
+            label: t('proxies.page.title.default'),
+            options: groups,
+            value: groupFilter,
+            setValue: (value: string) => {
+              savedGroupFilter = value
+              setGroupFilter(value)
+            },
+          },
+          {
+            id: 'matched-rule',
+            label: t('connections.components.fields.rule'),
+            options: rules,
+            value: ruleFilter,
+            setValue: (value: string) => {
+              savedRuleFilter = value
+              setRuleFilter(value)
+            },
+          },
+        ].map(({ id, label, options, value, setValue }) => (
+          <TextField
+            key={id}
+            select
+            size="small"
+            label={label}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            sx={{ flex: '0 1 220px', minWidth: 0, maxWidth: '100%' }}
+          >
+            <MenuItem value="">{t('shared.filters.logLevels.all')}</MenuItem>
+            {value && !options.has(value) && (
+              <MenuItem value={value}>{value}</MenuItem>
+            )}
+            {[...options].sort().map((option) => (
+              <MenuItem key={option} value={option}>
+                {option}
+              </MenuItem>
+            ))}
+          </TextField>
+        ))}
       </Box>
 
       {!hasTableData ? (

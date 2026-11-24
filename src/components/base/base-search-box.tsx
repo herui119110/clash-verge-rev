@@ -3,6 +3,7 @@ import { Box, SvgIcon, TextField, styled, IconButton } from '@mui/material'
 import Tooltip from '@mui/material/Tooltip'
 import {
   type ChangeEvent,
+  type ClipboardEvent,
   type MouseEvent,
   useCallback,
   useEffect,
@@ -36,6 +37,7 @@ type SearchProps = {
   matchWholeWord?: boolean
   useRegularExpression?: boolean
   searchState?: Partial<SearchOptionState>
+  normalizePastedText?: (text: string) => string | undefined
   onSearch: (match: (content: string) => boolean, state: SearchState) => void
   onClick?: (e: MouseEvent<HTMLDivElement>) => void
 }
@@ -92,6 +94,7 @@ export const BaseSearchBox = ({
   matchCase: defaultMatchCase = false,
   matchWholeWord: defaultMatchWholeWord = false,
   useRegularExpression: defaultUseRegularExpression = false,
+  normalizePastedText,
   onSearch,
   onClick,
 }: SearchProps) => {
@@ -158,10 +161,7 @@ export const BaseSearchBox = ({
     return buildRegex(text, flags) ? '' : t('shared.validation.invalidRegex')
   }, [matchCase, t, text, useRegularExpression])
 
-  const handleChangeText = (
-    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => {
-    const nextText = e.target?.value ?? ''
+  const updateText = (nextText: string) => {
     setText(nextText)
     emitSearch({
       text: nextText,
@@ -169,6 +169,18 @@ export const BaseSearchBox = ({
       matchWholeWord,
       useRegularExpression,
     })
+  }
+
+  const handleChangeText = (
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => updateText(e.target.value)
+
+  const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
+    if (useRegularExpression) return
+    const nextText = normalizePastedText?.(e.clipboardData.getData('text'))
+    if (!nextText) return
+    e.preventDefault()
+    updateText(nextText)
   }
 
   const handleToggleUseRegularExpression = () => {
@@ -215,6 +227,7 @@ export const BaseSearchBox = ({
         value={text}
         onClick={onClick}
         onChange={handleChangeText}
+        onPaste={normalizePastedText ? handlePaste : undefined}
         error={!!effectiveErrorMessage}
         slotProps={{
           input: {
